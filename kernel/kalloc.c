@@ -52,11 +52,12 @@ kfree(void *pa)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+  memset(pa, 1, PGSIZE);  //防止悬挂引用,正常情况很少出现整页被填充的情况
 
   r = (struct run*)pa;
 
   acquire(&kmem.lock);
+  //头插法,将内存使用并且返回给kem使用
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
@@ -80,3 +81,19 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+//遍历链表,获取可用内存
+uint64 get_memory(void){
+	uint64 ret=0;
+	struct run*r;
+	acquire(&kmem.lock);
+	r=kmem.freelist;
+	while(r){
+		ret++;
+		r=r->next;
+	}
+	release(&kmem.lock);
+	return ret*PGSIZE;
+}
+
+

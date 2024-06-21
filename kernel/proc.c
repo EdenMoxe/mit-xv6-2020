@@ -108,6 +108,7 @@ found:
   p->pid = allocpid();
 
   // Allocate a trapframe page.
+  // kalloc在kalloc.c中,返回0代表没有空闲表
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     release(&p->lock);
     return 0;
@@ -128,6 +129,19 @@ found:
   p->context.sp = p->kstack + PGSIZE;
 
   return p;
+}
+
+//获取正在运行的进程数
+uint64 get_procnum(void){
+	struct proc *p;
+	uint64 ret=0;
+	for(p = proc; p < &proc[NPROC]; p++){
+		acquire(&p->lock);
+		if(p->state!=UNUSED)
+			ret++;
+		release(&p->lock);
+	}
+	return ret;
 }
 
 // free a proc structure and the data hanging from it,
