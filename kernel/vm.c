@@ -168,7 +168,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 }
 
 // Remove npages of mappings starting from va. va must be
-// page-aligned. The mappings must exist.
+// page-aligned（页面对齐）. The mappings must exist.
 // Optionally free the physical memory.
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
@@ -439,4 +439,20 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+
+void vmprint(pagetable_t pagetable,uint64 recurlayers){
+	if(recurlayers==0)
+		printf("page table %p\n",pagetable);
+	for(int i=0;i<512;i++){
+		pte_t pte=pagetable[i];
+		uint64 child =PTE2PA(pte);
+		if((pte&PTE_V)&&recurlayers<=2){
+			for(int j=0;j<recurlayers;j++)
+				printf(".. ");
+			printf("..%d: pte %p pa %p\n",i,pte,child);	
+			vmprint((pagetable_t)child,recurlayers+1);
+		}
+	}
 }
