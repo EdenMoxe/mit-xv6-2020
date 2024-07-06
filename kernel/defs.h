@@ -179,6 +179,12 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 void            vmprint(pagetable_t,uint64);
+void            mykvmmap(uint64, uint64, uint64, int,pagetable_t);      
+pagetable_t     mykvminit(void);
+void            mykvminithart(pagetable_t);
+void            proc_myfreewalk(pagetable_t);
+void            proc_unmapknel_pagetable(pagetable_t);
+
 
 // plic.c
 void            plicinit(void);

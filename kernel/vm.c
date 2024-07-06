@@ -5,7 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h"
 /*
  * the kernel's page table.
  */
@@ -14,6 +15,7 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+
 
 /*
  * create a direct-map page table for the kernel.
@@ -131,8 +133,8 @@ kvmpa(uint64 va)
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
-  
-  pte = walk(kernel_pagetable, va, 0);
+  //pte = walk(kernel_pagetable, va, 0);
+  pte =walk(myproc()->knel_pagetable,va,0);
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
@@ -455,4 +457,78 @@ void vmprint(pagetable_t pagetable,uint64 recurlayers){
 			vmprint((pagetable_t)child,recurlayers+1);
 		}
 	}
+}
+
+//for pagetable test 2 
+//辅助函数，设置页表knel_pagetable；
+void mykvmmap(uint64 va, uint64 pa, uint64 sz, int perm,pagetable_t knel_pagetable)
+{
+  if(mappages(knel_pagetable, va, sz, pa, perm) != 0)
+    panic("mykvmmap");
+}
+
+//同kvminit,新建了页表副本knel_pagetable
+pagetable_t mykvminit()
+{
+  pagetable_t knel_pagetable=(pagetable_t)kalloc();
+  if(knel_pagetable==0)
+	return 0;
+  memset(knel_pagetable, 0, PGSIZE);
+
+  // uart registers
+  mykvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W,knel_pagetable);
+
+  // virtio mmio disk interface
+  mykvmmap(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W,knel_pagetable);
+
+  // CLINT
+  mykvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W,knel_pagetable);
+
+  // PLIC
+  mykvmmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W,knel_pagetable);
+
+  mykvmmap(KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X,knel_pagetable);
+
+  mykvmmap((uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W,knel_pagetable);
+
+  mykvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X,knel_pagetable);
+  return knel_pagetable;
+}
+
+void mykvminithart(pagetable_t knel_pagetable)                         
+{
+  w_satp(MAKE_SATP(knel_pagetable));
+  sfence_vma();
+}
+
+void proc_myfreewalk(pagetable_t knel_pagetable)
+{
+  // similar to the freewalk method
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = knel_pagetable[i];
+    if(pte & PTE_V){
+      knel_pagetable[i] = 0;
+      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        uint64 child = PTE2PA(pte);
+        proc_myfreewalk((pagetable_t)child);
+      }
+    }
+  }
+  kfree((void*)knel_pagetable);
+}
+
+void proc_unmapknel_pagetable(pagetable_t knel_pagetable){
+  // uart registers
+  uvmunmap(knel_pagetable,UART0, 1, 0);
+  // virtio mmio disk interface
+  uvmunmap(knel_pagetable,VIRTIO0, 1,0);
+  // CLINT
+  uvmunmap(knel_pagetable,CLINT, 0x10000/PGSIZE, 0);
+  // PLIC
+  uvmunmap(knel_pagetable,PLIC, 0x400000/PGSIZE, 0);
+  uvmunmap(knel_pagetable,KERNBASE,((uint64)etext-KERNBASE)/PGSIZE, 0);
+  uvmunmap(knel_pagetable, (uint64)etext, (PHYSTOP-(uint64)etext)/PGSIZE, 0);
+  uvmunmap(knel_pagetable,TRAMPOLINE, 1, 0);
+  freewalk(knel_pagetable);
 }
