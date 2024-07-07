@@ -163,7 +163,8 @@ freeproc(struct proc *p)
   if(p->knel_pagetable){
     uvmunmap(p->knel_pagetable,p->kstack,1,1);
   	p->kstack=0;
-	//proc_myfreewalk(p->knel_pagetable);
+	//proc_myfreewalk(p->knel_pagetable);	
+	uvmunmap(p->knel_pagetable,0,PGROUNDUP(p->sz)/PGSIZE,0);
 	proc_unmapknel_pagetable(p->knel_pagetable);
   	p->knel_pagetable=0;
   }
@@ -249,6 +250,8 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  uvm2kvm(p->pagetable,p->knel_pagetable,0,p->sz);
+
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -270,12 +273,17 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
+  //if(sz+n>=PLIC)
+  //	return -1;
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+	if(uvm2kvm(p->pagetable,p->knel_pagetable,sz-n,sz)!=0)
+	  return -1;
   } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    sz = uvmdealloc(p->pagetable, sz, sz + n);//减掉了n，为sz-n
+    kvmdealloc(p->knel_pagetable,sz-n,sz);
   }
   p->sz = sz;
   return 0;
@@ -302,8 +310,15 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
-
+  
   np->parent = p;
+  
+  //copy child process userpage to knel_pagetable;
+  if(uvm2kvm(np->pagetable, np->knel_pagetable, 0, np->sz)<0){
+    freeproc(np);
+    release(&np->lock);
+    return -1; 
+  }
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -324,6 +339,7 @@ fork(void)
   np->state = RUNNABLE;
 
   release(&np->lock);
+
 
   return pid;
 }

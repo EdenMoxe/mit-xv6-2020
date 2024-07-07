@@ -235,7 +235,9 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   if(newsz < oldsz)
     return oldsz;
-
+  
+  if(newsz>=PLIC)
+	return 0;
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += PGSIZE){
     mem = kalloc();
@@ -285,6 +287,7 @@ freewalk(pagetable_t pagetable)
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
     } else if(pte & PTE_V){
+	  //printf("pte\n:%x",pte);
       panic("freewalk: leaf");
     }
   }
@@ -350,6 +353,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
   *pte &= ~PTE_U;
 }
 
+
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
@@ -375,6 +379,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   return 0;
 }
 
+#if 0
+
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
@@ -399,6 +405,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   }
   return 0;
 }
+
 
 // Copy a null-terminated string from user to kernel.
 // Copy bytes to dst from virtual address srcva in a given page table,
@@ -443,6 +450,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
 }
 
+#endif 
 
 void vmprint(pagetable_t pagetable,uint64 recurlayers){
 	if(recurlayers==0)
@@ -482,7 +490,7 @@ pagetable_t mykvminit()
   mykvmmap(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W,knel_pagetable);
 
   // CLINT
-  mykvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W,knel_pagetable);
+  //mykvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W,knel_pagetable);
 
   // PLIC
   mykvmmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W,knel_pagetable);
@@ -524,11 +532,55 @@ void proc_unmapknel_pagetable(pagetable_t knel_pagetable){
   // virtio mmio disk interface
   uvmunmap(knel_pagetable,VIRTIO0, 1,0);
   // CLINT
-  uvmunmap(knel_pagetable,CLINT, 0x10000/PGSIZE, 0);
+  //uvmunmap(knel_pagetable,CLINT, 0x10000/PGSIZE, 0);
   // PLIC
   uvmunmap(knel_pagetable,PLIC, 0x400000/PGSIZE, 0);
   uvmunmap(knel_pagetable,KERNBASE,((uint64)etext-KERNBASE)/PGSIZE, 0);
   uvmunmap(knel_pagetable, (uint64)etext, (PHYSTOP-(uint64)etext)/PGSIZE, 0);
   uvmunmap(knel_pagetable,TRAMPOLINE, 1, 0);
   freewalk(knel_pagetable);
+}
+
+int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len){
+	return copyin_new(pagetable,dst,srcva,len);
+}
+
+
+int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max){
+	return copyinstr_new(pagetable,dst,srcva,max);
+}
+
+//参考uvmcopy，copy user pagetable to knel_pagetable
+int uvm2kvm(pagetable_t old, pagetable_t new, uint64 oldsz,uint64 newsz)
+{
+  pte_t *pte_user;
+  uint64 pa, i;
+  uint flags;
+  //参考uvmcopy
+  uint64 start=PGROUNDUP(oldsz);  //新增上对齐；
+  for(i = start; i < newsz; i += PGSIZE){
+    if((pte_user = walk(old, i, 0)) == 0) 
+	  panic("uvm2kvm: pte should exist"); 
+	if((*pte_user & PTE_V) == 0)
+	  panic("uvm2kvm: page not present");
+	pa = PTE2PA(*pte_user);
+	flags = PTE_FLAGS(*pte_user);
+	if(mappages(new,i,PGSIZE,pa,flags&~PTE_U)!=0){
+	  uvmunmap(new, start, (i-start)/ PGSIZE, 0);
+	  return -1;
+	}
+  }
+  return 0;
+}
+//参考uvmdealooc，唯一不同是uvmunmap参数0，即取消映射不会释放物理内存
+uint64 kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  if(newsz >= oldsz)
+    return oldsz;
+
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
+  }
+  return newsz;
 }

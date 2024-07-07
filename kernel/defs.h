@@ -184,7 +184,10 @@ pagetable_t     mykvminit(void);
 void            mykvminithart(pagetable_t);
 void            proc_myfreewalk(pagetable_t);
 void            proc_unmapknel_pagetable(pagetable_t);
-
+int             copyin_new(pagetable_t, char *, uint64, uint64);
+int             copyinstr_new(pagetable_t, char *, uint64, uint64);
+int             uvm2kvm(pagetable_t, pagetable_t, uint64,uint64);
+uint64          kvmdealloc(pagetable_t, uint64, uint64);
 
 // plic.c
 void            plicinit(void);
