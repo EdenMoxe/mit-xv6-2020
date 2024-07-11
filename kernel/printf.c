@@ -132,3 +132,21 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+//for trap experience
+void backtrace(void){
+  	printf("backtrace:\n");
+	uint64 *cur_frame=(uint64*)r_fp(); //读取当前fp
+	while((uint64)cur_frame>PGROUNDDOWN((uint64)cur_frame)&&(uint64)cur_frame<PGROUNDUP((uint64)cur_frame)){
+		printf("%p\n",*(cur_frame-1));
+		cur_frame=(uint64*)(*(cur_frame-2));
+	}
+}
+
+
+
+
+
+
+
+
