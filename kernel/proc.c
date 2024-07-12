@@ -126,7 +126,14 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  p->ticks_num=0;
+  p->alarm_handler=0;
+  p->ticks_lastime=0;
+  if((p->alarm_savetrapframe = (struct trapframe *)kalloc()) == 0){
+    release(&p->lock);
+    return 0;   
+  }
+  p->alarming_flag=0;
   return p;
 }
 
@@ -150,6 +157,14 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->ticks_num=0;
+  p->alarm_handler=0;
+  p->ticks_lastime=0;
+  if(p->alarm_savetrapframe)
+    kfree((void*)p->alarm_savetrapframe);
+  p->alarm_savetrapframe = 0;
+  p->alarming_flag=0;
+  
 }
 
 // Create a user page table for a given process,
