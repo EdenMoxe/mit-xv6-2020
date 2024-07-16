@@ -70,7 +70,11 @@ usertrap(void)
   } 
   else if(r_scause()==15||r_scause()==13){
     uint64 va=r_stval();
-    printf("page fault stval=%p\n",va);
+	if(va>p->sz||va<PGROUNDDOWN(p->trapframe->sp)){  //for address higher than lazy allocation or lower than stack
+	  //printf("Not Suit pagefault\n");
+	  exit(-1);
+	}
+    //printf("page fault stval=%p\n",va);
 	uint64 pa=(uint64)kalloc();
 	if(pa==0){
 	  p->killed=1;
