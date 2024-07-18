@@ -23,10 +23,36 @@ struct {
   struct run *freelist;
 } kmem;
 
+//for cow test
+#define PA2CNT(pa) (((uint64)pa-KERNBASE)/PGSIZE)
+struct {
+  int cow_num[PA2CNT(PHYSTOP)+1];                
+  struct spinlock cow_lock;
+}cow_count;
+
+int P(uint64 pa){
+  acquire(&cow_count.cow_lock);
+  if(pa<KERNBASE||pa>=PHYSTOP)
+    panic("P pa error\n");
+  int use_num=--cow_count.cow_num[PA2CNT(pa)];
+  release(&cow_count.cow_lock);
+  return use_num;
+}
+
+int V(uint64 pa){
+  acquire(&cow_count.cow_lock);
+  if(pa<KERNBASE||pa>=PHYSTOP)
+    panic("V pa error\n");
+  int use_num=++cow_count.cow_num[PA2CNT(pa)];
+  release(&cow_count.cow_lock);
+  return use_num;
+}
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&cow_count.cow_lock,"cow_count");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -35,6 +61,8 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
+  for(int i = 0; i < sizeof(cow_count.cow_num)/ sizeof(int); ++ i)
+  	cow_count.cow_num[i]=1;
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
 }
@@ -50,7 +78,13 @@ kfree(void *pa)
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
-
+ 
+  int num=P((uint64)pa);
+  if(num<0)
+	panic("kfree P<0");
+  if(num>0)
+	return;
+   
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -76,7 +110,11 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
+	//printf("%p\n",r);
+    cow_count.cow_num[PA2CNT(r)]=1;
+	//printf("%x\n",PA2CNT(r));
+  }
   return (void*)r;
 }

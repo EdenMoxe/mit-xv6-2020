@@ -49,6 +49,18 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
+
+  //for cow test
+  uint64 va=r_stval();
+  pte_t *pte =walk(p->pagetable,va,0);
+  if(pte == 0)           
+    exit(-1);
+	//panic("pte error");
+  uint64 pa = PTE2PA(*pte);
+  if(pa==0)
+    exit(-1);
+  //uint flags=PTE_FLAGS(*pte);
+  uint flags;
   
   if(r_scause() == 8){
     // system call
@@ -62,12 +74,28 @@ usertrap(void)
 
     // an interrupt will change sstatus &c registers,
     // so don't enable until done with those registers.
-    intr_on();
+	intr_on();
 
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } 
+  else if((r_scause()==15||r_scause()==13)&&(*pte&PTE_COW)){//for cow test
+    uint64 cow_pa=(uint64)kalloc();
+	if(cow_pa==0)
+	  //panic("usertrap cow_pa");
+	  exit(-1);
+	memmove((char*)cow_pa,(char*)pa,PGSIZE);
+	flags=PTE_FLAGS(*pte);
+	uvmunmap(p->pagetable,PGROUNDDOWN(va),1,1); //remember to cancel the parent process map
+    //*pte&=~PTE_COW;
+	//*pte|=PTE_W;
+	if(mappages(p->pagetable,PGROUNDDOWN(va),PGSIZE,cow_pa,(flags&~PTE_COW)|PTE_W)!=0){
+	  kfree((void*)cow_pa);
+      panic("usertrap mappage error");
+	}
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
