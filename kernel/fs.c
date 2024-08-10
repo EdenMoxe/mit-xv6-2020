@@ -386,7 +386,7 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
   bn -= NDIRECT;
-
+  
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
@@ -398,6 +398,32 @@ bmap(struct inode *ip, uint bn)
       log_write(bp);
     }
     brelse(bp);
+    return addr;
+  }
+	
+  bn -= NINDIRECT;
+
+  struct buf*b2p;
+  uint* a2;
+  if(bn<N2INDIRECT){
+    uint bn1 = bn/NINDIRECT;   //在1级Inode的编号
+    uint bn2 = bn%NINDIRECT;  //在2级Inode的编号
+    if((addr = ip->addrs[NDIRECT+1]) == 0)
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev); 
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+	if((addr=a[bn1])==0){
+      a[bn1] = addr = balloc(ip->dev);
+      log_write(bp);
+	}
+    b2p=bread(ip->dev,a[bn1]);
+	a2=(uint*)b2p->data;
+	if((addr=a2[bn2])==0){
+	  a2[bn2] = addr =balloc(ip->dev);
+      log_write(b2p);
+	}
+    brelse(bp);
+	brelse(b2p);
     return addr;
   }
 
@@ -432,6 +458,27 @@ itrunc(struct inode *ip)
     ip->addrs[NDIRECT] = 0;
   }
 
+  struct buf* b2p;
+  uint* a2;
+  if(ip->addrs[NDIRECT+1]){
+    bp=bread(ip->dev,ip->addrs[NDIRECT+1]);
+	a=(uint*)bp->data;
+    for(int i =0;i<NINDIRECT;i++){
+	  if(a[i]){
+	    b2p=bread(ip->dev,a[i]);               
+	    a2=(uint*)b2p->data;
+	    for(int j=0;j<NINDIRECT;j++){
+	      if(a2[j])
+            bfree(ip->dev,a2[j]);
+        }
+        brelse(b2p);
+        bfree(ip->dev,a[i]);
+	  }
+	}
+    brelse(bp);
+    bfree(ip->dev,ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1]=0;
+  }
   ip->size = 0;
   iupdate(ip);
 }
