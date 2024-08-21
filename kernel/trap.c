@@ -6,6 +6,11 @@
 #include "proc.h"
 #include "defs.h"
 
+#include "fs.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "file.h"
+
 struct spinlock tickslock;
 uint ticks;
 
@@ -65,7 +70,49 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } 
+  else if(r_scause()==13||r_scause()==15){
+    uint64 va = r_stval();
+    struct proc*p = myproc();
+    struct vma*vma=0;
+    for(int i = 0; i<VMA_MAXNUM; i++){
+      struct vma*vmai = &p->vma[i];
+      if(vmai->vma_used && va>=vmai->vma_start && va < vmai->vma_start+vmai->vma_length){
+        vma = vmai;
+        break;                                 
+      }
+    }
+    if(vma==0)
+      exit(-1);  //have to exit -1
+      //panic("Page Fault No Vma");
+    
+    uint64 pa = (uint64)kalloc();
+    if(!pa)
+      panic("Page Fault No pa");
+
+    memset((void*)pa,0,PGSIZE);//necessary,cause if non-zero can't pass the test
+
+    ilock(vma->vma_file->ip);//data from dip to ip
+    if(readi(vma->vma_file->ip,0,pa,va - vma->vma_start,PGSIZE)<=0)
+      panic("trap readi failed"); //data from ip to pa
+    iunlock(vma->vma_file->ip);
+
+    int perm=PTE_U|PTE_V;
+    if(vma->vma_prot&PROT_READ)
+      perm|=PTE_R;
+    if(vma->vma_prot&PROT_WRITE){
+      perm|=PTE_W;
+      perm|=PTE_Dirty;
+    }
+    if(vma->vma_prot&PROT_EXEC)
+      perm|=PTE_X;
+    if(mappages(p->pagetable,PGROUNDDOWN(va),PGSIZE,pa,perm)!=0){
+      kfree((void*)pa);
+      panic("mappages fault");
+    }
+  }
+  
+  else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

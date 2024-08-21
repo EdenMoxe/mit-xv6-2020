@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+#define errlog(error) do{printf(error);return -1;}while(0);
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -134,6 +135,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  memset(p->vma,0,sizeof(p->vma));
+
   return p;
 }
 
@@ -157,6 +160,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  memset(p->vma,0,sizeof(p->vma));
 }
 
 // Create a user page table for a given process,
@@ -301,6 +305,14 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
+  
+  for(int i=0; i<VMA_MAXNUM; i++){
+    struct vma *vma = &p->vma[i];
+    if(vma->vma_used){
+      np->vma[i]=*vma;
+      filedup(np->vma[i].vma_file);
+    }
+  }
 
   release(&np->lock);
 
@@ -343,7 +355,17 @@ exit(int status)
 
   if(p == initproc)
     panic("init exiting");
-
+  //for vma unmap 
+  for(int i = 0;i<VMA_MAXNUM; i++){
+    if(p->vma[i].vma_used){
+      if(vma_unmap(p->pagetable, p->vma[i].vma_start, \
+             p->vma[i].vma_start+p->vma[i].vma_length, &p->vma[i])!=0)
+        panic("exit unmap fault");
+      fileclose(p->vma[i].vma_file);
+      p->vma[i].vma_used = 0;
+    }
+  }
+  
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
     if(p->ofile[fd]){

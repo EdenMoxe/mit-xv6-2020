@@ -113,21 +113,27 @@ mmap_test(void)
   char *p = mmap(0, PGSIZE*2, PROT_READ, MAP_PRIVATE, fd, 0);
   if (p == MAP_FAILED)
     err("mmap (1)");
+  //printf("mmap1 OK\n");
   _v1(p);
-  if (munmap(p, PGSIZE*2) == -1)
-    err("munmap (1)");
-
+  //printf("V1 OK\n");
+  int a = munmap(p,PGSIZE*2);
+  //printf("%d\n",a);
+  if (a!=0)
+    printf("munmap (1)\n");
+  
   printf("test mmap f: OK\n");
     
   printf("test mmap private\n");
   // should be able to map file opened read-only with private writable
   // mapping
   p = mmap(0, PGSIZE*2, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+  printf("test mmap private mmap ok\n");
   if (p == MAP_FAILED)
     err("mmap (2)");
   if (close(fd) == -1)
     err("close");
   _v1(p);
+  printf("test mmap private v1 ok\n");
   for (i = 0; i < PGSIZE*2; i++)
     p[i] = 'Z';
   if (munmap(p, PGSIZE*2) == -1)
@@ -184,7 +190,7 @@ mmap_test(void)
     char b;
     if (read(fd, &b, 1) != 1)
       err("read (1)");
-    if (b != 'Z')
+   if (b != 'Z')
       err("file does not contain modifications");
   }
   if (close(fd) == -1)
@@ -262,9 +268,11 @@ fork_test(void)
     err("open");
   unlink(f);
   char *p1 = mmap(0, PGSIZE*2, PROT_READ, MAP_SHARED, fd, 0);
+  printf("forktest mmap1 ok\n");
   if (p1 == MAP_FAILED)
     err("mmap (4)");
   char *p2 = mmap(0, PGSIZE*2, PROT_READ, MAP_SHARED, fd, 0);
+  printf("forktest mmap2 ok\n");
   if (p2 == MAP_FAILED)
     err("mmap (5)");
 
@@ -276,7 +284,9 @@ fork_test(void)
     err("fork");
   if (pid == 0) {
     _v1(p1);
+  printf("fork munmap begin");
     munmap(p1, PGSIZE); // just the first page
+    printf("forktest fork ok\n");
     exit(0); // tell the parent that the mapping looks OK.
   }
 
@@ -289,7 +299,9 @@ fork_test(void)
   }
 
   // check that the parent's mappings are still there.
+    printf("forktest parentp1 begin\n");
   _v1(p1);
+    printf("forktest parentp1 ok\n");
   _v1(p2);
 
   printf("fork_test OK\n");

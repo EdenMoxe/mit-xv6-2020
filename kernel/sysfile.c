@@ -15,6 +15,9 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
+
+#define errlog(error) do{printf(error);return -1;}while(0);
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -484,3 +487,138 @@ sys_pipe(void)
   }
   return 0;
 }
+
+//for mmap: void *mmap(void *addr, uint64 length, int prot,int flags,int fd, uint64 offset);
+uint64 sys_mmap(void){
+  uint64 va,length,offset;
+  int prot,flags,fd;
+  struct file* file;
+  
+  if(argaddr(0,&va)<0||argaddr(1,&length)<0||argint(2,&prot)<0 \
+    ||argint(3,&flags)<0||argfd(4,&fd,&file)<0||argaddr(5,&offset)<0)
+    errlog("parameter fault\n");
+
+  //va and offset should be 0
+  if(va!=0||offset!=0)
+  errlog("va/offset non-zero\n");
+
+  struct proc *p = myproc(); //current process 
+  
+  if(file->ref<1||(!file->readable&&(prot&PROT_READ))|| \
+    (!file->writable&&((prot&PROT_WRITE)&&(flags&MAP_SHARED))))
+      errlog("mmap file flags wrong\n");
+
+  length = PGROUNDUP(length);  //mmap length aligned
+
+  struct vma *free_vm;
+  int found = 0;
+  uint64 end = TRAPFRAME;
+  for(int i = 0;i<VMA_MAXNUM;i++){
+    if(p->vma[i].vma_used){
+      end = PGROUNDDOWN(p->vma[i].vma_start); //end aligned
+    }
+    else if(p->vma[i].vma_used==0&&!found){
+      free_vm = &p->vma[i];
+      free_vm->vma_used = 1;
+      found = 1;		
+    }
+  }
+  end=end < TRAPFRAME? end : TRAPFRAME;  
+  
+  if(!found)
+    errlog("Full vma\n"); 
+  
+  free_vm->vma_start = end - length; //start aligned
+  free_vm->vma_length = length;
+  free_vm->vma_prot = prot;
+  free_vm->vma_flags = flags;
+  free_vm->vma_file = file;
+  filedup(free_vm->vma_file);
+  return free_vm->vma_start;
+}
+
+int vma_unmap(pagetable_t pagetable,uint64 va,uint64 va_end,struct vma*vma){
+  pte_t *pte;
+  uint64 pa;
+  uint64 va1;
+  //int i =0;
+  for(va1 = PGROUNDDOWN(va);va1< PGROUNDUP(va_end); va1 += PGSIZE){
+    //i++;
+    //printf("%d\n",i);
+    //just for test
+    printf("%p\t",va1);
+    printf("%p\n",va_end);
+  
+    pte = walk(pagetable,va1,0);
+    if(pte==0)
+      errlog("vma_unmap No pte\n");
+    if(PTE_FLAGS(*pte) == PTE_V)  //非叶子结点
+      errlog("Non-leaf pte\n");
+    if(((*pte)&PTE_V)==0) 
+      continue;
+    pa = PTE2PA(*pte);
+
+    if((*pte&PTE_Dirty)&&(vma->vma_flags&MAP_SHARED)){ //PTE_Dirty
+    begin_op();
+    ilock(vma->vma_file->ip);
+    uint64 offset = va1 - va;
+     
+    if(offset < 0)
+      writei(vma->vma_file->ip, 0, pa+(-offset),0 ,PGSIZE-(-offset));
+
+    else if(offset + PGSIZE > vma->vma_length)
+      writei(vma->vma_file->ip,0 ,pa ,offset ,PGSIZE-offset);
+
+    else
+      writei(vma->vma_file->ip,0 ,pa ,offset ,PGSIZE);
+
+    iunlock(vma->vma_file->ip);
+    end_op();
+    }                                                         
+    kfree((void*)pa);
+    *pte = 0;
+  }
+  return 0;
+}
+
+uint64 sys_munmap(void){// int munmap(void *addr, uint64 length);
+  uint64 va,length;
+  if(argaddr(0,&va)<0||argaddr(1,&length)<0)
+    errlog("munmap parameter fault\n");
+  //printf("begin!\n"); 
+  struct proc *p=myproc();
+  struct vma *vma = 0;
+  for(int i = 0; i<VMA_MAXNUM; i++){
+    struct vma*vmai = &p->vma[i];
+    if(vmai->vma_used&& va >= vmai->vma_start&& va < (vmai->vma_start+vmai->vma_length)){
+      vma = vmai;
+      break;
+    }
+  }
+
+  if(!vma)
+    errlog("munmap No VMA\n");
+  
+  if(va>vma->vma_start&& va+length < vma->vma_start+vma->vma_length)
+    errlog("Hole unmap");
+ 
+  //printf("begi2!\n"); 
+  if(vma_unmap(p->pagetable, va, va+length, vma)!=0)
+    errlog("unmap fault\n");
+  //printf("begi3!\n"); 
+
+
+  if(PGROUNDDOWN(va)==vma->vma_start){
+    vma->vma_start += length;
+    //printf("caller!\n"); //for test
+  } 
+  vma->vma_length -= length;
+
+  if(vma->vma_length <= 0){
+    fileclose(vma->vma_file);
+    vma->vma_used = 0;
+  }
+  //printf("begin!\n"); 
+  return 0;
+}
+
