@@ -8,6 +8,7 @@
 
 void mmap_test();
 void fork_test();
+void mmap_mysorttest();
 char buf[BSIZE];
 
 #define MAP_FAILED ((char *) -1)
@@ -17,6 +18,7 @@ main(int argc, char *argv[])
 {
   mmap_test();
   fork_test();
+  mmap_mysorttest();
   printf("mmaptest: all tests succeeded\n");
   exit(0);
 }
@@ -75,6 +77,51 @@ makefile(const char *f)
   if (close(fd) == -1)
     err("close");
 }
+
+
+//just for my sort test,No necessary
+void mmap_mysorttest(void){
+  int fd1,fd2,fd3,fd4;
+  printf("MY Sort test====================\n");
+  const char * const f1 = "sort1.dur";
+  makefile(f1);
+  if ((fd1 = open(f1, O_RDONLY)) == -1)
+    err("open");
+  char *p1 = mmap(0, PGSIZE*2, PROT_READ, MAP_PRIVATE, fd1, 0);
+  printf("p1 map\n");
+
+  const char * const f2 = "sort2.dur";
+  makefile(f2);
+  if ((fd2 = open(f2, O_RDONLY)) == -1)
+    err("open");
+  mmap(0, PGSIZE*2, PROT_READ, MAP_PRIVATE, fd2, 0);
+
+  munmap(p1,PGSIZE*2);
+  printf("p1 unmap\n");
+  
+  if(close(fd1)<0)
+    err("my sort close err");
+ 
+  const char * const f3 = "sort3.dur";
+  makefile(f3);
+  if ((fd3 = open(f3, O_RDONLY)) == -1)
+    err("open");
+  mmap(0, PGSIZE, PROT_READ, MAP_PRIVATE, fd3, 0);
+  printf("p3 map\n");
+  
+  const char * const f4 = "sort4.dur";
+  makefile(f4);
+  if ((fd4 = open(f4, O_RDONLY)) == -1)
+    err("open");
+  mmap(0, PGSIZE, PROT_READ, MAP_PRIVATE, fd4, 0);
+    
+  if(close(fd2)<0||close(fd3)<0||close(fd4)<0)
+    err("my sort close err");
+ 
+  exit(0);
+
+}
+
 
 void
 mmap_test(void)
@@ -246,6 +293,7 @@ mmap_test(void)
   printf("test mmap two files: OK\n");
   
   printf("mmap_test: ALL OK\n");
+
 }
 
 //

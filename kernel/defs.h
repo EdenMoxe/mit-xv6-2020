@@ -107,7 +107,6 @@ int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 int             vma_unmap(pagetable_t pageteable,uint64 va,uint64 va_end,struct vma*vma);
-
 // swtch.S
 void            swtch(struct context*, struct context*);
 

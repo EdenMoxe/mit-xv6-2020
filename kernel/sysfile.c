@@ -488,6 +488,83 @@ sys_pipe(void)
   return 0;
 }
 
+//Quick Sort for vma start_addr
+int getpivot(struct vma vma[], int low, int high){
+  struct vma pivot = vma[low];
+  while(low<high){
+    while(low<high&&vma[high].vma_start<=pivot.vma_start)
+      high--;
+    vma[low] = vma[high];
+    while(low<high&&vma[low].vma_start>=pivot.vma_start)
+      low++;
+    vma[high] = vma[low];
+  }
+  vma[low] = pivot;
+  return low;
+}
+
+void QuickSort(struct vma  vma[], int low, int high){
+  if(low<high){
+    int pivot = getpivot(vma,low,high);
+    QuickSort(vma,low,pivot-1);
+    QuickSort(vma,pivot+1,high);    
+  }
+}
+
+struct vma* get_gapstaddr(struct vma vma[],uint64 length){
+  QuickSort(vma,0,VMA_MAXNUM-1);  //按起始地址大到小排序
+  uint64 end = TRAPFRAME;
+  uint64 endtemp = TRAPFRAME;
+  int found = 0;
+  struct vma *free_vm;
+  for(int i=0; i<VMA_MAXNUM; i++){
+    if(vma[i].vma_used==1){
+      endtemp = PGROUNDDOWN(vma[i].vma_start);
+    }
+    else if(!found&&vma[i].vma_used==0){
+        found = 1;
+        free_vm = &vma[i]; 
+    }
+  }
+  if(!found)
+    return 0;
+
+  end = endtemp < end ? endtemp : end;
+  printf("endtemp=%x  end=%x\n",endtemp,end);
+  int gap_flag = 0;
+  if(vma[0].vma_used==0&&TRAPFRAME-(vma[1].vma_start+vma[1].vma_length)>=length){
+    free_vm->vma_start = TRAPFRAME-length;
+    free_vm->vma_used = 1;
+    return free_vm;
+  }
+  for (int i = 1; i < VMA_MAXNUM; i++) {
+    if (vma[i].vma_used==0) {
+      uint64 gap = vma[i-1].vma_start - vma[i].vma_start;
+      if (gap >= length) {
+        free_vm->vma_start = PGROUNDDOWN(vma[i-1].vma_start) - length;
+        free_vm->vma_used = 1;
+        gap_flag = 1;
+        break;
+      }
+    }
+    if(vma[i].vma_used==1&&vma[i-1].vma_used==1){
+      uint64 gap = vma[i-1].vma_start - (vma[i].vma_start + vma[i].vma_length);
+      if(gap>=length){
+        free_vm->vma_start = PGROUNDDOWN(vma[i-1].vma_start) - length;
+        free_vm->vma_used = 1;
+        gap_flag = 1;
+        break;  
+      }
+    } 
+  }
+  if(gap_flag==0){
+    free_vm ->vma_start = end - length;
+    free_vm->vma_used = 1;
+  }
+  return free_vm;
+}
+
+
 //for mmap: void *mmap(void *addr, uint64 length, int prot,int flags,int fd, uint64 offset);
 uint64 sys_mmap(void){
   uint64 va,length,offset;
@@ -500,7 +577,7 @@ uint64 sys_mmap(void){
 
   //va and offset should be 0
   if(va!=0||offset!=0)
-  errlog("va/offset non-zero\n");
+    errlog("va/offset non-zero\n");
 
   struct proc *p = myproc(); //current process 
   
@@ -509,31 +586,23 @@ uint64 sys_mmap(void){
       errlog("mmap file flags wrong\n");
 
   length = PGROUNDUP(length);  //mmap length aligned
+    
+  struct vma* free_vm = get_gapstaddr(p->vma,length);
+  
+  if(free_vm==0)
+    return -1;
 
-  struct vma *free_vm;
-  int found = 0;
-  uint64 end = TRAPFRAME;
-  for(int i = 0;i<VMA_MAXNUM;i++){
-    if(p->vma[i].vma_used){
-      end = PGROUNDDOWN(p->vma[i].vma_start); //end aligned
-    }
-    else if(p->vma[i].vma_used==0&&!found){
-      free_vm = &p->vma[i];
-      free_vm->vma_used = 1;
-      found = 1;		
-    }
-  }
-  end=end < TRAPFRAME? end : TRAPFRAME;  
-  
-  if(!found)
-    errlog("Full vma\n"); 
-  
-  free_vm->vma_start = end - length; //start aligned
   free_vm->vma_length = length;
   free_vm->vma_prot = prot;
   free_vm->vma_flags = flags;
   free_vm->vma_file = file;
   filedup(free_vm->vma_file);
+
+  //For MY Sort Test
+  for(int i=0; i<5; i++){
+    printf("vma%d: start:%x , size:%x, flag:%d\n",i,p->vma[i].vma_start,p->vma[i].vma_length,p->vma[i].vma_used); 
+  }
+
   return free_vm->vma_start;
 }
 
